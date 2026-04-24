@@ -326,6 +326,11 @@ public:
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
 
+    // In-process tool invocation (skips JSON-RPC reply path).
+    // Must be called from the Application main task (same constraint as DoToolCall).
+    // Throws std::runtime_error on unknown tool or missing required arguments.
+    std::string InvokeTool(const std::string& name, const cJSON* arguments);
+
 private:
     McpServer();
     ~McpServer();

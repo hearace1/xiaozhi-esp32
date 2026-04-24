@@ -1,6 +1,7 @@
 #include "ota.h"
 #include "system_info.h"
 #include "settings.h"
+#include "time_sync.h"
 #include "assets/lang_config.h"
 
 #include <freertos/FreeRTOS.h>
@@ -199,6 +200,8 @@ esp_err_t Ota::CheckVersion() {
             // 如果有时区偏移，计算本地时间
             if (cJSON_IsNumber(timezone_offset)) {
                 ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒
+                // 同步给时区偏移给 SNTP 回调，保持「本地时间即系统时钟」语义
+                SaveTimezoneOffsetMinutes(timezone_offset->valueint);
             }
             
             tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒

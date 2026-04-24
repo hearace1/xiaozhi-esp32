@@ -508,6 +508,36 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     ReplyResult(id, json);
 }
 
+std::string McpServer::InvokeTool(const std::string& name, const cJSON* arguments) {
+    auto tool_iter = std::find_if(tools_.begin(), tools_.end(),
+                                  [&name](const McpTool* tool) { return tool->name() == name; });
+    if (tool_iter == tools_.end()) {
+        throw std::runtime_error("Unknown tool: " + name);
+    }
+
+    PropertyList args = (*tool_iter)->properties();
+    for (auto& argument : args) {
+        bool found = false;
+        if (cJSON_IsObject(arguments)) {
+            auto value = cJSON_GetObjectItem(arguments, argument.name().c_str());
+            if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
+                argument.set_value<bool>(cJSON_IsTrue(value));
+                found = true;
+            } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
+                argument.set_value<int>(value->valueint);
+                found = true;
+            } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
+                argument.set_value<std::string>(value->valuestring);
+                found = true;
+            }
+        }
+        if (!argument.has_default_value() && !found) {
+            throw std::runtime_error("Missing valid argument: " + argument.name());
+        }
+    }
+    return (*tool_iter)->Call(args);
+}
+
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
     auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
                                  [&tool_name](const McpTool* tool) { 

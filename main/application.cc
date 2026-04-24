@@ -9,6 +9,9 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "time_sync.h"
+#include "scheduler/scheduled_task_manager.h"
+#include "scheduler/scheduler_mcp_tools.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -97,6 +100,10 @@ void Application::Initialize() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+
+    // Scheduled-task / alarm subsystem
+    ScheduledTaskManager::GetInstance().Initialize();
+    RegisterSchedulerTools(mcp_server);
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -249,7 +256,10 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
+            // Fire any due scheduled tasks
+            ScheduledTaskManager::GetInstance().Tick();
+
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
@@ -260,6 +270,8 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+    // Start SNTP after first successful network connection (idempotent)
+    InitializeSntp();
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {

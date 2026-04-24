@@ -36,6 +36,9 @@ set(SOURCES "audio/audio_codec.cc"
             "settings.cc"
             "device_state_machine.cc"
             "assets.cc"
+            "time_sync.cc"
+            "scheduler/scheduled_task_manager.cc"
+            "scheduler/scheduler_mcp_tools.cc"
             "main.cc"
             )
 
