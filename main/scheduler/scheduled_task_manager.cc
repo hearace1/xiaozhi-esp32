@@ -323,7 +323,7 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
     switch (task.action_type) {
         case ActionType::Alarm: {
             std::string message;
-            const char* sound = Lang::Sounds::OGG_EXCLAMATION;
+            std::string_view sound = Lang::Sounds::OGG_EXCLAMATION;
             if (!task.action_payload.empty()) {
                 cJSON* payload = cJSON_Parse(task.action_payload.c_str());
                 if (cJSON_IsObject(payload)) {
