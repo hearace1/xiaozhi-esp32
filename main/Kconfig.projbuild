@@ -131,6 +131,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
         bool "Bread Compact WiFi + LCD + Camera (面包板)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_S3_CAM_DEVPRO
+        bool "S3-CAM-DevPro (ESP32-S3 + 2寸 LCD + 摄像头)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_ML307
         bool "Bread Compact ML307/EC801E (面包板 4G)"
         depends on IDF_TARGET_ESP32S3
@@ -598,7 +601,7 @@ choice DISPLAY_OLED_TYPE
 endchoice
 
 choice DISPLAY_LCD_TYPE
-    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_CGC || BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_CGC || BOARD_TYPE_BREAD_COMPACT_WIFI_CAM || BOARD_TYPE_S3_CAM_DEVPRO
     prompt "LCD Type"
     default LCD_ST7789_240X320
     help
