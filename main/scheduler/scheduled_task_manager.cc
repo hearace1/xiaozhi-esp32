@@ -372,9 +372,12 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             break;
         }
         case ActionType::AiPrompt: {
-            // AiPrompt was deprecated: server protocol can't deliver long text via
-            // the wake-word channel. Degrade to an alarm-style notification using
-            // payload.text (or title) as the message so legacy tasks still fire visibly.
+            // 把 prompt 文本作为短 wake_word 发给服务端 —— 服务端会把它视为
+            // 用户的第一句话喂给 LLM，AI 自然回复，从而实现"主动提醒"的效果。
+            // 限制：服务端对 listen.detect 文本有长度上限（实测 18+ 中文字会被拒），
+            //      因此这里按字节截断（保 UTF-8 边界）至 kMaxPromptBytes。
+            static constexpr size_t kMaxPromptBytes = 45;  // ~15 中文字
+
             std::string text;
             if (!task.action_payload.empty()) {
                 cJSON* payload = cJSON_Parse(task.action_payload.c_str());
@@ -385,13 +388,25 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 if (payload) cJSON_Delete(payload);
             }
             if (text.empty()) text = task.title;
-            if (text.empty()) text = "Reminder";
-            ESP_LOGW(TAG, "Legacy 'prompt' action degraded to alarm: %s", text.c_str());
-            Application::GetInstance().Alert(
-                task.title.empty() ? "Reminder" : task.title.c_str(),
-                text.c_str(),
-                "thinking",
-                Lang::Sounds::OGG_EXCLAMATION);
+            if (text.empty()) {
+                ESP_LOGW(TAG, "AiPrompt task has no text or title");
+                break;
+            }
+
+            if (text.size() > kMaxPromptBytes) {
+                size_t cut = kMaxPromptBytes;
+                // 退到上一个 UTF-8 字符边界，避免把多字节字符切成一半
+                while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+                    --cut;
+                }
+                ESP_LOGW(TAG, "AiPrompt text truncated %u→%u bytes",
+                         (unsigned)text.size(), (unsigned)cut);
+                text.resize(cut);
+            }
+
+            Application::GetInstance().Schedule([text]() {
+                Application::GetInstance().WakeWordInvoke(text);
+            });
             break;
         }
     }

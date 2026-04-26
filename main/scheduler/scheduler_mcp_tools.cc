@@ -68,17 +68,17 @@ void RegisterSchedulerTools(McpServer& server) {
         "  trigger: one of 'once' | 'daily' | 'weekly'\n"
         "  time: for trigger='once' use 'YYYY-MM-DD HH:MM:SS' in local time; for 'daily'/'weekly' use 'HH:MM'\n"
         "  weekdays: only for trigger='weekly'; comma-separated digits 0..6 (0=Sunday). For Mon–Fri use '1,2,3,4,5'. Pass empty string otherwise.\n"
-        "  action: one of 'alarm' | 'tool'\n"
-        "    alarm → DEFAULT for any reminder request ('remind me to X at T', 'set an alarm for T', '每天 7 点叫我起床报天气', etc.). Plays sound + shows popup with a message on screen. Payload is optional; format {\"message\":\"...\"}. If payload is empty the title is used as the message.\n"
-        "    tool  → use ONLY when the user wants the device to perform a concrete tool action at T (e.g. set volume, turn on a light, set theme). Payload REQUIRED: {\"name\":\"<tool name>\",\"args\":{...}}.\n"
-        "  payload: JSON string as described above. For 'tool' it is REQUIRED.\n"
+        "  action: one of 'alarm' | 'tool' | 'prompt'\n"
+        "    alarm  → SAFE DEFAULT for any reminder. Plays sound + shows popup with a message on screen. Payload optional; format {\"message\":\"...\"}; empty payload uses title.\n"
+        "    tool   → use ONLY when the user wants the device to perform a concrete tool action at T (e.g. set volume, turn on a light). Payload REQUIRED: {\"name\":\"<tool name>\",\"args\":{...}}.\n"
+        "    prompt → use when user wants the AI to PROACTIVELY SPEAK at T. The text is sent through the wake-word channel and treated as the user's first utterance, so the AI will naturally reply. Payload REQUIRED: {\"text\":\"<short message, ≤14 中文字 / ≤45 bytes>\"}. Longer text is truncated and may be rejected by the server. Phrase the text as something the user would say so the AI's reply is natural.\n"
+        "  payload: JSON string as described above. For 'tool' and 'prompt' it is REQUIRED.\n"
         "Examples:\n"
-        "  User says '5 分钟后提醒我'           → action='alarm', title='提醒', payload=''\n"
-        "  User says '提醒我 3 点开会'          → action='alarm', title='开会', payload='{\"message\":\"开会时间到了\"}'\n"
-        "  User says '每早 7 点提醒我看天气'    → action='alarm', title='看天气', payload='{\"message\":\"该看天气了\"}'\n"
-        "  User says '每天 22 点把音量调到 20'  → action='tool',  payload='{\"name\":\"self.audio_speaker.set_volume\",\"args\":{\"volume\":20}}'\n"
-        "Returns: the new task id, or a string starting with 'ERROR:' if input is invalid.\n"
-        "Note: this device cannot proactively speak long messages — for any reminder, always use action='alarm' with a clear message.",
+        "  User says '5 分钟后提醒我'           → action='alarm',  title='提醒', payload=''\n"
+        "  User says '提醒我 3 点开会'          → action='alarm',  title='开会', payload='{\"message\":\"开会时间到了\"}'\n"
+        "  User says '每天 22 点把音量调到 20'  → action='tool',   payload='{\"name\":\"self.audio_speaker.set_volume\",\"args\":{\"volume\":20}}'\n"
+        "  User says '5 分钟后让小智叫我洗漱'   → action='prompt', payload='{\"text\":\"该去洗漱啦\"}'  (short, AI naturally reminds)\n"
+        "Returns: the new task id, or a string starting with 'ERROR:' if input is invalid.",
         PropertyList({
             Property("title", kPropertyTypeString),
             Property("trigger", kPropertyTypeString),
@@ -120,8 +120,8 @@ void RegisterSchedulerTools(McpServer& server) {
             std::string action = props["action"].value<std::string>();
             if (action == "alarm")       task.action_type = Manager::ActionType::Alarm;
             else if (action == "tool")   task.action_type = Manager::ActionType::InvokeTool;
-            else if (action == "prompt") return std::string("ERROR: action='prompt' is not supported on this device (server protocol cannot deliver long text); use action='alarm' with a clear message instead");
-            else return std::string("ERROR: invalid action, expected alarm|tool");
+            else if (action == "prompt") task.action_type = Manager::ActionType::AiPrompt;
+            else return std::string("ERROR: invalid action, expected alarm|tool|prompt");
 
             task.action_payload = props["payload"].value<std::string>();
 
@@ -140,6 +140,18 @@ void RegisterSchedulerTools(McpServer& server) {
                     if (!cJSON_IsString(name) || std::string(name->valuestring).empty()) {
                         if (payload) cJSON_Delete(payload);
                         return std::string("ERROR: action='tool' requires payload {\"name\":\"<tool name>\",\"args\":{...}}");
+                    }
+                }
+                if (task.action_type == Manager::ActionType::AiPrompt) {
+                    auto* text = payload ? cJSON_GetObjectItem(payload, "text") : nullptr;
+                    if (!cJSON_IsString(text) || std::string(text->valuestring).empty()) {
+                        if (payload) cJSON_Delete(payload);
+                        return std::string("ERROR: action='prompt' requires payload {\"text\":\"<short message ≤14 中文字>\"}");
+                    }
+                    // Server rejects long detect text; warn early so AI knows to shorten.
+                    if (std::string(text->valuestring).size() > 45) {
+                        if (payload) cJSON_Delete(payload);
+                        return std::string("ERROR: prompt text too long; keep it ≤14 中文字 / ≤45 bytes, or use action='alarm' with payload.message instead");
                     }
                 }
                 if (payload) cJSON_Delete(payload);
