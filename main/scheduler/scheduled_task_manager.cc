@@ -274,6 +274,34 @@ void ScheduledTaskManager::Tick() {
     if (!initialized_) return;
 
     int64_t now = static_cast<int64_t>(time(nullptr));
+
+    // Diagnostic: every 30s, print wall clock + next pending fire so we can
+    // tell from the log whether time has been synced and whether tasks exist.
+    static int64_t last_diag = 0;
+    if (now - last_diag >= 30 || now < last_diag) {
+        last_diag = now;
+        int64_t next = INT64_MAX;
+        std::string next_id;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto& t : tasks_) {
+                if (t.enabled && t.next_fire_epoch > 0 && t.next_fire_epoch < next) {
+                    next = t.next_fire_epoch;
+                    next_id = t.id;
+                }
+            }
+        }
+        if (next == INT64_MAX) {
+            ESP_LOGI(TAG, "tick: now=%lld (synced=%d) tasks=%u no-pending",
+                     (long long)now, now >= 1700000000 ? 1 : 0,
+                     (unsigned)tasks_.size());
+        } else {
+            ESP_LOGI(TAG, "tick: now=%lld (synced=%d) next=%s in %lld s",
+                     (long long)now, now >= 1700000000 ? 1 : 0,
+                     next_id.c_str(), (long long)(next - now));
+        }
+    }
+
     // 系统时间还没被 settimeofday 设置过时，now 会是很小的值（1970 附近）；跳过
     if (now < 1700000000) return;
 
