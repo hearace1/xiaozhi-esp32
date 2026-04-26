@@ -372,6 +372,9 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             break;
         }
         case ActionType::AiPrompt: {
+            // AiPrompt was deprecated: server protocol can't deliver long text via
+            // the wake-word channel. Degrade to an alarm-style notification using
+            // payload.text (or title) as the message so legacy tasks still fire visibly.
             std::string text;
             if (!task.action_payload.empty()) {
                 cJSON* payload = cJSON_Parse(task.action_payload.c_str());
@@ -381,14 +384,14 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 }
                 if (payload) cJSON_Delete(payload);
             }
-            if (text.empty()) {
-                ESP_LOGW(TAG, "AiPrompt task has no 'text'");
-                break;
-            }
-            // WakeWordInvoke 需要在主任务中执行且要求网络已连
-            Application::GetInstance().Schedule([text]() {
-                Application::GetInstance().WakeWordInvoke(text);
-            });
+            if (text.empty()) text = task.title;
+            if (text.empty()) text = "Reminder";
+            ESP_LOGW(TAG, "Legacy 'prompt' action degraded to alarm: %s", text.c_str());
+            Application::GetInstance().Alert(
+                task.title.empty() ? "Reminder" : task.title.c_str(),
+                text.c_str(),
+                "thinking",
+                Lang::Sounds::OGG_EXCLAMATION);
             break;
         }
     }
