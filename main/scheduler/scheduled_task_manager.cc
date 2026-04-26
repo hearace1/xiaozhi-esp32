@@ -291,14 +291,16 @@ void ScheduledTaskManager::Tick() {
                 }
             }
         }
+        // Use %ld (long) instead of %lld — ESP-IDF's nano printf doesn't
+        // support long long. time_t fits in 32 bits until 2038 anyway.
         if (next == INT64_MAX) {
-            ESP_LOGI(TAG, "tick: now=%lld (synced=%d) tasks=%u no-pending",
-                     (long long)now, now >= 1700000000 ? 1 : 0,
+            ESP_LOGI(TAG, "tick: now=%ld synced=%d tasks=%u no-pending",
+                     (long)now, now >= 1700000000 ? 1 : 0,
                      (unsigned)tasks_.size());
         } else {
-            ESP_LOGI(TAG, "tick: now=%lld (synced=%d) next=%s in %lld s",
-                     (long long)now, now >= 1700000000 ? 1 : 0,
-                     next_id.c_str(), (long long)(next - now));
+            ESP_LOGI(TAG, "tick: now=%ld synced=%d next=%s in %ld s",
+                     (long)now, now >= 1700000000 ? 1 : 0,
+                     next_id.c_str(), (long)(next - now));
         }
     }
 
