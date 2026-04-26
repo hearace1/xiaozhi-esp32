@@ -232,13 +232,20 @@ std::string ScheduledTaskManager::AddTask(Task task) {
     }
     task.id = AllocateIdLocked();
     task.enabled = true;
-    task.next_fire_epoch =
-        ComputeNextFireEpoch(task, static_cast<int64_t>(time(nullptr)));
+    int64_t now = static_cast<int64_t>(time(nullptr));
+    task.next_fire_epoch = ComputeNextFireEpoch(task, now);
+    ESP_LOGI(TAG, "Added task %s: trigger=%s once_epoch=%ld minute_of_day=%d "
+                  "weekday_mask=0x%02x action=%s next_fire=%ld (in %ld s) now=%ld",
+             task.id.c_str(), TriggerToString(task.trigger_type),
+             (long)task.once_epoch, task.minute_of_day, task.weekday_mask,
+             ActionToString(task.action_type),
+             (long)task.next_fire_epoch,
+             (long)(task.next_fire_epoch > now ? task.next_fire_epoch - now : -1),
+             (long)now);
     std::string new_id = task.id;
     tasks_.push_back(std::move(task));
-    RecomputeAllNextFire(static_cast<int64_t>(time(nullptr)));
+    RecomputeAllNextFire(now);
     PersistLocked();
-    ESP_LOGI(TAG, "Added task %s", new_id.c_str());
     return new_id;
 }
 
