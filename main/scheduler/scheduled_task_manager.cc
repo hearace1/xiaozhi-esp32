@@ -420,13 +420,12 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
         }
         case ActionType::AiPrompt: {
             // 把 prompt 文本作为短 wake_word 发给服务端 —— 服务端会把它视为
-            // 用户的第一句话喂给 LLM。直接发"该喝水啦"AI 会当成用户在嘀咕，
-            // 加一个固定前缀 "请提醒我：" 后语义变成"用户在请你提醒"，AI 会
-            // 自然以提醒口吻回复。
-            // 限制：服务端对 listen.detect 文本有长度上限（实测 18+ 中文字会被拒），
-            //      整体（前缀 + 用户文本）按 UTF-8 字符边界截断至 kMaxPromptBytes。
-            static constexpr size_t kMaxPromptBytes = 45;          // ~15 中文字
-            static constexpr const char* kPromptPrefix = "请提醒我：";  // 15 bytes UTF-8
+            // 用户的第一句话喂给 LLM。
+            // 服务端对 listen.detect 的 text 长度上限非常严（实测 12 字节通过、
+            // 36 字节被拒），约等于 4-5 个中文字封顶。所以这里既不能加前缀，
+            // 也必须把用户文本砍到极短。
+            // AI 端在 add_task 描述里被要求自己用"提醒：XX"这种紧凑措辞。
+            static constexpr size_t kMaxPromptBytes = 24;  // ~8 中文字，保守值
 
             std::string text;
             if (!task.action_payload.empty()) {
@@ -443,19 +442,18 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 break;
             }
 
-            std::string framed = std::string(kPromptPrefix) + text;
-            if (framed.size() > kMaxPromptBytes) {
+            if (text.size() > kMaxPromptBytes) {
                 size_t cut = kMaxPromptBytes;
-                while (cut > 0 && (static_cast<unsigned char>(framed[cut]) & 0xC0) == 0x80) {
+                while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
                     --cut;
                 }
                 ESP_LOGW(TAG, "AiPrompt text truncated %u→%u bytes",
-                         (unsigned)framed.size(), (unsigned)cut);
-                framed.resize(cut);
+                         (unsigned)text.size(), (unsigned)cut);
+                text.resize(cut);
             }
 
-            Application::GetInstance().Schedule([framed]() {
-                Application::GetInstance().WakeWordInvoke(framed);
+            Application::GetInstance().Schedule([text]() {
+                Application::GetInstance().WakeWordInvoke(text);
             });
             break;
         }

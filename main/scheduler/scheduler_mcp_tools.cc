@@ -71,7 +71,7 @@ void RegisterSchedulerTools(McpServer& server) {
         "  action: one of 'alarm' | 'tool' | 'prompt'\n"
         "    alarm  → SAFE DEFAULT for any reminder. Plays sound + shows popup with a message on screen. Payload optional; format {\"message\":\"...\"}; empty payload uses title.\n"
         "    tool   → use ONLY when the user wants the device to perform a concrete tool action at T (e.g. set volume, turn on a light). Payload REQUIRED: {\"name\":\"<tool name>\",\"args\":{...}}.\n"
-        "    prompt → use when user wants the AI to PROACTIVELY SPEAK at T. Provide just the reminder content itself; the device will auto-prepend '请提醒我：' so the AI replies in reminder voice. Payload REQUIRED: {\"text\":\"<reminder content, ≤9 中文字 / ≤30 bytes>\"}. Longer text is truncated. Examples: text='该喝水啦', text='吃药时间到了', text='起床啦'. DO NOT include '提醒'/'请' yourself.\n"
+        "    prompt → use when user wants the AI to PROACTIVELY SPEAK at T. The text is sent as the user's first utterance to the LLM, so phrase it as a SELF-CONTAINED reminder cue (NOT bare statements that look like the user musing). The server hard-rejects text longer than ~6 中文字 (~18 bytes), so be EXTREMELY concise. Payload REQUIRED: {\"text\":\"<≤6 中文字>\"}. Good: text='提醒喝水', text='该吃药了', text='起床啦'. Bad: text='该喝水啦' (looks like user mumbling), text='莹仔该写作业啦' (too long). When in doubt, prefer action='alarm' which has no length limit.\n"
         "  payload: JSON string as described above. For 'tool' and 'prompt' it is REQUIRED.\n"
         "Examples:\n"
         "  User says '5 分钟后提醒我'           → action='alarm',  title='提醒', payload=''\n"
@@ -146,12 +146,12 @@ void RegisterSchedulerTools(McpServer& server) {
                     auto* text = payload ? cJSON_GetObjectItem(payload, "text") : nullptr;
                     if (!cJSON_IsString(text) || std::string(text->valuestring).empty()) {
                         if (payload) cJSON_Delete(payload);
-                        return std::string("ERROR: action='prompt' requires payload {\"text\":\"<short reminder content ≤9 中文字>\"}");
+                        return std::string("ERROR: action='prompt' requires payload {\"text\":\"<≤6 中文字 reminder cue>\"}");
                     }
-                    // Device auto-prepends "请提醒我：" (15 bytes); leave 30 bytes for text.
-                    if (std::string(text->valuestring).size() > 30) {
+                    // Server hard-rejects detect text > ~18 bytes. Keep it tight.
+                    if (std::string(text->valuestring).size() > 24) {
                         if (payload) cJSON_Delete(payload);
-                        return std::string("ERROR: prompt text too long; keep it ≤9 中文字 / ≤30 bytes (the device adds '请提醒我：' itself), or use action='alarm' with payload.message instead");
+                        return std::string("ERROR: prompt text too long; server rejects > ~6 中文字. Keep it ≤24 bytes, or use action='alarm' (no length limit) instead");
                     }
                 }
                 if (payload) cJSON_Delete(payload);
