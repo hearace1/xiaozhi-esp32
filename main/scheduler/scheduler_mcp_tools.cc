@@ -71,7 +71,7 @@ void RegisterSchedulerTools(McpServer& server) {
         "  action: one of 'alarm' | 'tool' | 'prompt'\n"
         "    alarm  → SAFE DEFAULT for any reminder. Plays sound + shows popup with a message on screen. Payload optional; format {\"message\":\"...\"}; empty payload uses title.\n"
         "    tool   → use ONLY when the user wants the device to perform a concrete tool action at T (e.g. set volume, turn on a light). Payload REQUIRED: {\"name\":\"<tool name>\",\"args\":{...}}.\n"
-        "    prompt → use when user wants the AI to PROACTIVELY SPEAK at T. The text is sent as the user's first utterance to the LLM, so phrase it as a SELF-CONTAINED reminder cue (NOT bare statements that look like the user musing). The server hard-rejects text longer than ~6 中文字 (~18 bytes), so be EXTREMELY concise. Payload REQUIRED: {\"text\":\"<≤6 中文字>\"}. Good: text='提醒喝水', text='该吃药了', text='起床啦'. Bad: text='该喝水啦' (looks like user mumbling), text='莹仔该写作业啦' (too long). When in doubt, prefer action='alarm' which has no length limit.\n"
+        "    prompt → use when user wants the AI to PROACTIVELY SPEAK at T. The text can be ANY length (held on device, fetched through self.schedule.fetch_due_reminder). When the prompt fires the device sends a fixed trigger '【定时】' to you, and you MUST call fetch_due_reminder to retrieve this exact text and deliver it. Payload REQUIRED: {\"text\":\"<the reminder content as you'd say it to the user>\"}. Examples: text='莹仔该去写作业啦', text='喝水时间到了，莹仔记得多喝点温水哦', text='起床啦小懒虫～'.\n"
         "  payload: JSON string as described above. For 'tool' and 'prompt' it is REQUIRED.\n"
         "Examples:\n"
         "  User says '5 分钟后提醒我'           → action='alarm',  title='提醒', payload=''\n"
@@ -146,12 +146,12 @@ void RegisterSchedulerTools(McpServer& server) {
                     auto* text = payload ? cJSON_GetObjectItem(payload, "text") : nullptr;
                     if (!cJSON_IsString(text) || std::string(text->valuestring).empty()) {
                         if (payload) cJSON_Delete(payload);
-                        return std::string("ERROR: action='prompt' requires payload {\"text\":\"<≤6 中文字 reminder cue>\"}");
+                        return std::string("ERROR: action='prompt' requires payload {\"text\":\"<reminder content>\"}");
                     }
-                    // Server hard-rejects detect text > ~18 bytes. Keep it tight.
-                    if (std::string(text->valuestring).size() > 24) {
+                    // No tight length limit any more — content is fetched via MCP, not the wake-word channel.
+                    if (std::string(text->valuestring).size() > 256) {
                         if (payload) cJSON_Delete(payload);
-                        return std::string("ERROR: prompt text too long; server rejects > ~6 中文字. Keep it ≤24 bytes, or use action='alarm' (no length limit) instead");
+                        return std::string("ERROR: prompt text exceeds 256 bytes; please shorten");
                     }
                 }
                 if (payload) cJSON_Delete(payload);
@@ -183,5 +183,17 @@ void RegisterSchedulerTools(McpServer& server) {
             return Manager::GetInstance().CancelTask(props["id"].value<std::string>());
         });
 
-    ESP_LOGI(TAG, "Registered 3 scheduler tools");
+    server.AddTool(
+        "self.schedule.fetch_due_reminder",
+        "Fetch the content of a scheduled prompt that just fired. **You MUST call this tool whenever the user's input is the literal trigger phrase '【定时】'** "
+        "(or starts with it) — that phrase is sent automatically by the device when an action='prompt' task fires; the real reminder content is held on the device and must be retrieved through this tool. "
+        "Returns: a JSON object {\"text\":\"<the reminder content>\",\"age_s\":<seconds since fired>} when there is a pending reminder, or an empty object {} when none. "
+        "After getting the text, deliver it to the user as a natural reminder (e.g. '到时间啦，<text>～'). "
+        "If the result is empty, just acknowledge briefly without inventing content.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            return Manager::GetInstance().FetchDueReminder();
+        });
+
+    ESP_LOGI(TAG, "Registered 4 scheduler tools");
 }

@@ -54,6 +54,11 @@ public:
     // 每秒由 Application 主循环调用一次
     void Tick();
 
+    // AiPrompt 流：FireTask 把待提醒文本入队 + 发短 wake_word，
+    // 服务端 AI 收到 wake_word 后调 fetch_due_reminder 取走真正内容。
+    // 调用一次即清空当前 slot；超过 TTL 的也会被自动丢弃。
+    std::string FetchDueReminder();
+
 private:
     ScheduledTaskManager() = default;
     ScheduledTaskManager(const ScheduledTaskManager&) = delete;
@@ -70,6 +75,10 @@ private:
     std::vector<Task> tasks_;
     int next_id_ = 1;
     bool initialized_ = false;
+
+    // AiPrompt 待取队列（最多 1 条，新值覆盖旧值，过期自动失效）
+    std::string pending_prompt_text_;
+    int64_t pending_prompt_epoch_ = 0;
 };
 
 #endif // SCHEDULED_TASK_MANAGER_H

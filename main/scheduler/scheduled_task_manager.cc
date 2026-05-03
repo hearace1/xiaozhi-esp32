@@ -260,6 +260,38 @@ bool ScheduledTaskManager::CancelTask(const std::string& id) {
     return true;
 }
 
+std::string ScheduledTaskManager::FetchDueReminder() {
+    static constexpr int64_t kPromptTtlSeconds = 120;  // 太久没人取就丢弃
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    int64_t now = static_cast<int64_t>(time(nullptr));
+
+    if (pending_prompt_text_.empty()) {
+        ESP_LOGI(TAG, "FetchDueReminder: no pending prompt");
+        return "{}";
+    }
+    if (now - pending_prompt_epoch_ > kPromptTtlSeconds) {
+        ESP_LOGW(TAG, "FetchDueReminder: pending prompt expired (age %lds), discarding",
+                 (long)(now - pending_prompt_epoch_));
+        pending_prompt_text_.clear();
+        pending_prompt_epoch_ = 0;
+        return "{}";
+    }
+
+    cJSON* obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "text", pending_prompt_text_.c_str());
+    cJSON_AddNumberToObject(obj, "age_s", static_cast<double>(now - pending_prompt_epoch_));
+    char* s = cJSON_PrintUnformatted(obj);
+    std::string result = s ? s : "{}";
+    if (s) cJSON_free(s);
+    cJSON_Delete(obj);
+
+    ESP_LOGI(TAG, "FetchDueReminder: delivering '%s'", pending_prompt_text_.c_str());
+    pending_prompt_text_.clear();
+    pending_prompt_epoch_ = 0;
+    return result;
+}
+
 std::string ScheduledTaskManager::ListTasksJson() const {
     std::lock_guard<std::mutex> lock(mutex_);
     cJSON* arr = cJSON_CreateArray();
@@ -419,13 +451,13 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             break;
         }
         case ActionType::AiPrompt: {
-            // 把 prompt 文本作为短 wake_word 发给服务端 —— 服务端会把它视为
-            // 用户的第一句话喂给 LLM。
-            // 服务端对 listen.detect 的 text 长度上限非常严（实测 12 字节通过、
-            // 36 字节被拒），约等于 4-5 个中文字封顶。所以这里既不能加前缀，
-            // 也必须把用户文本砍到极短。
-            // AI 端在 add_task 描述里被要求自己用"提醒：XX"这种紧凑措辞。
-            static constexpr size_t kMaxPromptBytes = 24;  // ~8 中文字，保守值
+            // 两段式 prompt 流：服务端 listen.detect 文本有 ~18 字节硬限制，
+            // 长 reminder 塞不进去。改用"短触发 + MCP 拉取"：
+            //   ① 把真实 reminder 文本写到 pending 槽
+            //   ② 发固定短 wake_word "【定时】"（12 bytes）
+            //   ③ 服务端 AI 看到这个触发词后会调 self.schedule.fetch_due_reminder
+            //      把真实 reminder 拿走，再用提醒口吻回播给用户
+            static constexpr const char* kPromptTrigger = "【定时】";
 
             std::string text;
             if (!task.action_payload.empty()) {
@@ -442,18 +474,13 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 break;
             }
 
-            if (text.size() > kMaxPromptBytes) {
-                size_t cut = kMaxPromptBytes;
-                while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
-                    --cut;
-                }
-                ESP_LOGW(TAG, "AiPrompt text truncated %u→%u bytes",
-                         (unsigned)text.size(), (unsigned)cut);
-                text.resize(cut);
-            }
+            // 占用 pending 槽（已持有 mutex_）
+            pending_prompt_text_ = text;
+            pending_prompt_epoch_ = now;
+            ESP_LOGI(TAG, "Pending prompt set: '%s' (will be fetched by AI)", text.c_str());
 
-            Application::GetInstance().Schedule([text]() {
-                Application::GetInstance().WakeWordInvoke(text);
+            Application::GetInstance().Schedule([]() {
+                Application::GetInstance().WakeWordInvoke(kPromptTrigger);
             });
             break;
         }
