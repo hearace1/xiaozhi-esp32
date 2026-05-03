@@ -420,10 +420,13 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
         }
         case ActionType::AiPrompt: {
             // 把 prompt 文本作为短 wake_word 发给服务端 —— 服务端会把它视为
-            // 用户的第一句话喂给 LLM，AI 自然回复，从而实现"主动提醒"的效果。
+            // 用户的第一句话喂给 LLM。直接发"该喝水啦"AI 会当成用户在嘀咕，
+            // 加一个固定前缀 "请提醒我：" 后语义变成"用户在请你提醒"，AI 会
+            // 自然以提醒口吻回复。
             // 限制：服务端对 listen.detect 文本有长度上限（实测 18+ 中文字会被拒），
-            //      因此这里按字节截断（保 UTF-8 边界）至 kMaxPromptBytes。
-            static constexpr size_t kMaxPromptBytes = 45;  // ~15 中文字
+            //      整体（前缀 + 用户文本）按 UTF-8 字符边界截断至 kMaxPromptBytes。
+            static constexpr size_t kMaxPromptBytes = 45;          // ~15 中文字
+            static constexpr const char* kPromptPrefix = "请提醒我：";  // 15 bytes UTF-8
 
             std::string text;
             if (!task.action_payload.empty()) {
@@ -440,19 +443,19 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 break;
             }
 
-            if (text.size() > kMaxPromptBytes) {
+            std::string framed = std::string(kPromptPrefix) + text;
+            if (framed.size() > kMaxPromptBytes) {
                 size_t cut = kMaxPromptBytes;
-                // 退到上一个 UTF-8 字符边界，避免把多字节字符切成一半
-                while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+                while (cut > 0 && (static_cast<unsigned char>(framed[cut]) & 0xC0) == 0x80) {
                     --cut;
                 }
                 ESP_LOGW(TAG, "AiPrompt text truncated %u→%u bytes",
-                         (unsigned)text.size(), (unsigned)cut);
-                text.resize(cut);
+                         (unsigned)framed.size(), (unsigned)cut);
+                framed.resize(cut);
             }
 
-            Application::GetInstance().Schedule([text]() {
-                Application::GetInstance().WakeWordInvoke(text);
+            Application::GetInstance().Schedule([framed]() {
+                Application::GetInstance().WakeWordInvoke(framed);
             });
             break;
         }
