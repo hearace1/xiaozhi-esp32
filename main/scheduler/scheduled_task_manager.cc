@@ -360,7 +360,10 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
     switch (task.action_type) {
         case ActionType::Alarm: {
             std::string message;
-            std::string_view sound = Lang::Sounds::OGG_EXCLAMATION;
+            // Use OGG_SUCCESS — same sound that plays at activation, so we know
+            // it's audible. OGG_EXCLAMATION sometimes fails to play after long idle
+            // because the codec output may have powered down.
+            std::string_view sound = Lang::Sounds::OGG_SUCCESS;
             if (!task.action_payload.empty()) {
                 cJSON* payload = cJSON_Parse(task.action_payload.c_str());
                 if (cJSON_IsObject(payload)) {
@@ -371,11 +374,18 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             }
             if (message.empty()) message = task.title;
             if (message.empty()) message = "Reminder";
+            ESP_LOGI(TAG, "Alarm: title='%s' message='%s' sound_size=%u",
+                     task.title.c_str(), message.c_str(), (unsigned)sound.size());
             Application::GetInstance().Alert(
                 task.title.empty() ? "Reminder" : task.title.c_str(),
                 message.c_str(),
                 "thinking",
                 sound);
+            // Belt-and-suspenders: play sound twice with a small delay so even if the
+            // first round happened while codec was waking up, the second hits.
+            Application::GetInstance().Schedule([sound]() {
+                Application::GetInstance().GetAudioService().PlaySound(sound);
+            });
             break;
         }
         case ActionType::InvokeTool: {
