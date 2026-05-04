@@ -332,16 +332,27 @@ void ScheduledTaskManager::Tick() {
                 }
             }
         }
-        // Use %ld (long) instead of %lld — ESP-IDF's nano printf doesn't
-        // support long long. time_t fits in 32 bits until 2038 anyway.
+        // pending prompt 状态也一起打出来方便诊断
+        std::string pending_state;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (!pending_prompt_text_.empty()) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf),
+                              " pending=1 sent=%d age=%lds",
+                              pending_wake_sent_ ? 1 : 0,
+                              (long)(now - pending_prompt_epoch_));
+                pending_state = buf;
+            }
+        }
         if (next == INT64_MAX) {
-            ESP_LOGI(TAG, "tick: now=%ld synced=%d tasks=%u no-pending",
+            ESP_LOGI(TAG, "tick: now=%ld synced=%d tasks=%u no-pending%s",
                      (long)now, now >= 1700000000 ? 1 : 0,
-                     (unsigned)tasks_.size());
+                     (unsigned)tasks_.size(), pending_state.c_str());
         } else {
-            ESP_LOGI(TAG, "tick: now=%ld synced=%d next=%s in %ld s",
+            ESP_LOGI(TAG, "tick: now=%ld synced=%d next=%s in %ld s%s",
                      (long)now, now >= 1700000000 ? 1 : 0,
-                     next_id.c_str(), (long)(next - now));
+                     next_id.c_str(), (long)(next - now), pending_state.c_str());
         }
     }
 

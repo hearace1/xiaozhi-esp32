@@ -185,11 +185,14 @@ void RegisterSchedulerTools(McpServer& server) {
 
     server.AddTool(
         "self.schedule.fetch_due_reminder",
-        "Fetch the content of a scheduled prompt that just fired. Call this tool in EITHER of these situations:\n"
-        "  (a) The user's input is the literal trigger phrase '【定时】' (or starts with it). The device sends this automatically when an action='prompt' task fires while the device is idle; the real reminder content is held on the device and must be retrieved through this tool.\n"
-        "  (b) The user asks about a recent reminder, e.g. '什么提醒', '刚才什么提醒', '提醒我什么', '查一下提醒', '刚才弹了个什么'. (When a prompt fires while the user is mid-conversation, the device only shows a silent on-screen notification; the user may then ask out loud.)\n"
+        "Fetch the content of a scheduled prompt that just fired on the device.\n"
+        "**CRITICAL: Always call this tool when ANY of the conditions below match — DO NOT answer from memory or context.** "
+        "The pending reminder is stored on the device's hardware NVS, NOT in your conversation context. Even if you set the task earlier in this conversation, the device may have updated, expired, or replaced the pending text since then; only this tool returns the current truth.\n"
+        "Call this tool whenever:\n"
+        "  (a) The user's input contains or equals the trigger phrase '【定时】'. The device sends this automatically when an action='prompt' task fires while the device is idle.\n"
+        "  (b) The user asks about a reminder in any phrasing — examples (NOT exhaustive): '什么提醒', '有什么提醒', '有提醒吗', '刚才什么提醒', '刚刚提醒了什么', '提醒我什么', '查一下提醒', '刚才弹了什么', '刚才屏幕上是什么', '到点了吗', '现在该做什么了', or anything similar in any language. When in doubt, CALL THE TOOL.\n"
         "Returns: a JSON object {\"text\":\"<the reminder content>\",\"age_s\":<seconds since fired>} when there is a pending reminder, or an empty object {} when none.\n"
-        "After getting the text, deliver it to the user as a natural reminder (e.g. '到时间啦，<text>～'). If the result is empty, tell the user there's no pending reminder.",
+        "After getting the text, deliver it to the user as a natural reminder (e.g. '到时间啦，<text>～'). If the result is empty, just say there's no pending reminder right now — do not invent one or recall an earlier one from memory.",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             return Manager::GetInstance().FetchDueReminder();
