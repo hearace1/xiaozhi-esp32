@@ -519,15 +519,20 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             ESP_LOGI(TAG, "Pending prompt set: '%s' (waiting for idle to deliver)",
                      text.c_str());
 
-            // 如果设备正在聊天，屏幕弹一个非阻塞通知告诉用户"有新提醒可以问我"。
-            // 不响声音 / 不改 emotion / 不打断当前对话。空闲时不需要 —— Tick
-            // 接下来一秒就会自动通过 wake_word 把内容播出去。
+            // 如果设备正在聊天：
+            //   ① 播一声 OGG_POPUP（"叮"），让用户听见有提醒到了
+            //   ② SetEmotion("thinking") 给个视觉信号；AI 下次 TTS 会自动复位
+            //   ③ 屏幕弹通知带 🔔，告诉用户可以"问我什么提醒"
+            // 不打断当前对话状态，不送 wake_word（Tick 等空闲再发）。
+            // 空闲时不需要——Tick 下一秒就会通过 wake_word 自动播出去。
             if (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
                 Application::GetInstance().Schedule([]() {
                     auto display = Board::GetInstance().GetDisplay();
                     if (display) {
-                        display->ShowNotification("有新提醒，问我'什么提醒'查看", 6000);
+                        display->SetEmotion("thinking");
+                        display->ShowNotification("🔔 有新提醒，问我「什么提醒」", 6000);
                     }
+                    Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
                 });
             }
             break;
