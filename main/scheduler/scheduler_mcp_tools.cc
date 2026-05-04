@@ -185,11 +185,11 @@ void RegisterSchedulerTools(McpServer& server) {
 
     server.AddTool(
         "self.schedule.fetch_due_reminder",
-        "Fetch the content of a scheduled prompt that just fired. **You MUST call this tool whenever the user's input is the literal trigger phrase '【定时】'** "
-        "(or starts with it) — that phrase is sent automatically by the device when an action='prompt' task fires; the real reminder content is held on the device and must be retrieved through this tool. "
-        "Returns: a JSON object {\"text\":\"<the reminder content>\",\"age_s\":<seconds since fired>} when there is a pending reminder, or an empty object {} when none. "
-        "After getting the text, deliver it to the user as a natural reminder (e.g. '到时间啦，<text>～'). "
-        "If the result is empty, just acknowledge briefly without inventing content.",
+        "Fetch the content of a scheduled prompt that just fired. Call this tool in EITHER of these situations:\n"
+        "  (a) The user's input is the literal trigger phrase '【定时】' (or starts with it). The device sends this automatically when an action='prompt' task fires while the device is idle; the real reminder content is held on the device and must be retrieved through this tool.\n"
+        "  (b) The user asks about a recent reminder, e.g. '什么提醒', '刚才什么提醒', '提醒我什么', '查一下提醒', '刚才弹了个什么'. (When a prompt fires while the user is mid-conversation, the device only shows a silent on-screen notification; the user may then ask out loud.)\n"
+        "Returns: a JSON object {\"text\":\"<the reminder content>\",\"age_s\":<seconds since fired>} when there is a pending reminder, or an empty object {} when none.\n"
+        "After getting the text, deliver it to the user as a natural reminder (e.g. '到时间啦，<text>～'). If the result is empty, tell the user there's no pending reminder.",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             return Manager::GetInstance().FetchDueReminder();

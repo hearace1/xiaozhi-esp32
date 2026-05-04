@@ -9,6 +9,8 @@
 
 #include "application.h"
 #include "assets/lang_config.h"
+#include "board.h"
+#include "display/display.h"
 #include "mcp_server.h"
 #include "settings.h"
 
@@ -505,6 +507,18 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             pending_wake_sent_ = false;
             ESP_LOGI(TAG, "Pending prompt set: '%s' (waiting for idle to deliver)",
                      text.c_str());
+
+            // 如果设备正在聊天，屏幕弹一个非阻塞通知告诉用户"有新提醒可以问我"。
+            // 不响声音 / 不改 emotion / 不打断当前对话。空闲时不需要 —— Tick
+            // 接下来一秒就会自动通过 wake_word 把内容播出去。
+            if (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
+                Application::GetInstance().Schedule([]() {
+                    auto display = Board::GetInstance().GetDisplay();
+                    if (display) {
+                        display->ShowNotification("有新提醒，问我'什么提醒'查看", 6000);
+                    }
+                });
+            }
             break;
         }
     }
