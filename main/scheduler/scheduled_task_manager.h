@@ -79,6 +79,7 @@ private:
     // AiPrompt 待取队列（最多 1 条，新值覆盖旧值，过期自动失效）
     std::string pending_prompt_text_;
     int64_t pending_prompt_epoch_ = 0;
+    bool pending_wake_sent_ = false;  // wake_word 是否已发出（避免重复发）
 };
 
 #endif // SCHEDULED_TASK_MANAGER_H

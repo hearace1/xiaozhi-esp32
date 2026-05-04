@@ -346,6 +346,35 @@ void ScheduledTaskManager::Tick() {
     // 系统时间还没被 settimeofday 设置过时，now 会是很小的值（1970 附近）；跳过
     if (now < 1700000000) return;
 
+    // ─── pending prompt 投递 ───
+    // FireTaskLocked 只把 prompt 文本写到 pending 槽。这里负责挑设备空闲的瞬间
+    // 把固定触发词 "【定时】" 发出去，避免在用户聊天时打断对话。
+    {
+        static constexpr const char* kPromptTrigger = "【定时】";
+        static constexpr int64_t kPromptDeliveryTtl = 120;  // 太久没机会发就放弃
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!pending_prompt_text_.empty()) {
+            int64_t age = now - pending_prompt_epoch_;
+            if (age > kPromptDeliveryTtl) {
+                ESP_LOGW(TAG, "Pending prompt expired (age %lds, sent=%d)",
+                         (long)age, pending_wake_sent_ ? 1 : 0);
+                pending_prompt_text_.clear();
+                pending_prompt_epoch_ = 0;
+                pending_wake_sent_ = false;
+            } else if (!pending_wake_sent_ &&
+                       Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+                ESP_LOGI(TAG, "Delivering pending prompt now (idle, age %lds)", (long)age);
+                pending_wake_sent_ = true;
+                Application::GetInstance().Schedule([]() {
+                    Application::GetInstance().WakeWordInvoke(kPromptTrigger);
+                });
+            }
+            // 非空闲且未发：静等下一次 Tick
+            // 已发但未 fetch：等 AI 调 fetch_due_reminder 或 TTL 到期
+        }
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<size_t> to_fire;
@@ -451,14 +480,10 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
             break;
         }
         case ActionType::AiPrompt: {
-            // 两段式 prompt 流：服务端 listen.detect 文本有 ~18 字节硬限制，
-            // 长 reminder 塞不进去。改用"短触发 + MCP 拉取"：
-            //   ① 把真实 reminder 文本写到 pending 槽
-            //   ② 发固定短 wake_word "【定时】"（12 bytes）
-            //   ③ 服务端 AI 看到这个触发词后会调 self.schedule.fetch_due_reminder
-            //      把真实 reminder 拿走，再用提醒口吻回播给用户
-            static constexpr const char* kPromptTrigger = "【定时】";
-
+            // 两段式 prompt 流（详见 Tick 里的发送逻辑）：
+            //   ① FireTask 仅把内容写到 pending 槽，不立刻动 wake_word
+            //   ② Tick 在设备空闲时才发触发词 "【定时】"（避免打断当前对话）
+            //   ③ 服务端 AI 收到触发词后调 self.schedule.fetch_due_reminder 取走内容
             std::string text;
             if (!task.action_payload.empty()) {
                 cJSON* payload = cJSON_Parse(task.action_payload.c_str());
@@ -474,14 +499,12 @@ void ScheduledTaskManager::FireTaskLocked(Task& task, int64_t now) {
                 break;
             }
 
-            // 占用 pending 槽（已持有 mutex_）
+            // 占用 pending 槽（已持有 mutex_）。下一个 Tick 看到设备空闲会自动送出。
             pending_prompt_text_ = text;
             pending_prompt_epoch_ = now;
-            ESP_LOGI(TAG, "Pending prompt set: '%s' (will be fetched by AI)", text.c_str());
-
-            Application::GetInstance().Schedule([]() {
-                Application::GetInstance().WakeWordInvoke(kPromptTrigger);
-            });
+            pending_wake_sent_ = false;
+            ESP_LOGI(TAG, "Pending prompt set: '%s' (waiting for idle to deliver)",
+                     text.c_str());
             break;
         }
     }
